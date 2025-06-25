@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Inventory Management Quiz</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Global Firebase instances (accessible by other scripts after module loads)
+        window.firebaseApp = null;
+        window.db = null;
+        window.auth = null;
+        window.currentUserId = null;
+        window.isAuthReady = false;
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        // Initialize Firebase app
+        if (Object.keys(firebaseConfig).length > 0) {
+            window.firebaseApp = initializeApp(firebaseConfig);
+            window.db = getFirestore(window.firebaseApp);
+            window.auth = getAuth(window.firebaseApp);
+
+            onAuthStateChanged(window.auth, async (user) => {
+                if (!user) {
+                    // Sign in anonymously if no user is present, or if initial token is not provided
+                    if (initialAuthToken) {
+                        try {
+                            await signInWithCustomToken(window.auth, initialAuthToken);
+                        } catch (error) {
+                            console.error("Error signing in with custom token:", error);
+                            await signInAnonymously(window.auth);
+                        }
+                    } else {
+                        await signInAnonymously(window.auth);
+                    }
+                }
+                window.currentUserId = window.auth.currentUser?.uid || crypto.randomUUID(); // Fallback for anonymous
+                window.isAuthReady = true;
+                console.log("Firebase Auth Ready. User ID:", window.currentUserId);
+                // If user ID display element exists, update it
+                const userIdDisplay = document.getElementById('user-id-display');
+                if (userIdDisplay) {
+                    userIdDisplay.textContent = `User ID: ${window.currentUserId}`;
+                }
+            });
+        } else {
+            console.error("Firebase configuration is missing.");
+            window.isAuthReady = true; // Mark as ready even if no Firebase to prevent blocking
+            window.currentUserId = crypto.randomUUID(); // Assign a random ID for offline use
+            const userIdDisplay = document.getElementById('user-id-display');
+            if (userIdDisplay) {
+                userIdDisplay.textContent = `User ID: (Offline) ${window.currentUserId}`;
+            }
+        }
+    </script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .quiz-container {
+            max-width: 800px; /* Increased max-width for longer questions */
+            margin: auto;
+        }
+        .option.selected {
+            background-color: #3b82f6; /* bg-blue-500 */
+            color: white;
+            border-color: #2563eb; /* border-blue-700 */
+        }
+        .option.correct {
+            background-color: #22c55e; /* bg-green-500 */
+            color: white;
+            border-color: #16a34a; /* border-green-700 */
+        }
+        .option.incorrect {
+            background-color: #ef4444; /* bg-red-500 */
+            color: white;
+            border-color: #dc2626; /* border-red-600 */
+        }
+        /* Custom scrollbar for results summary */
+        #results-summary::-webkit-scrollbar {
+            width: 8px;
+        }
+        #results-summary::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 10px;
+        }
+        #results-summary::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 10px;
+        }
+        #results-summary::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+        .loading-spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: #3b82f6; /* Blue spinner */
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            vertical-align: middle;
+            margin-left: 8px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200 flex items-center justify-center min-h-screen p-4">
+
+    <div id="quiz-container" class="quiz-container w-full bg-white dark:bg-gray-800 p-6 sm:p-8 rounded-2xl shadow-lg transition-all duration-500">
+        <!-- Quiz Start Screen -->
+        <div id="start-screen">
+            <h1 class="text-3xl sm:text-4xl font-bold text-center text-blue-600 dark:text-blue-400 mb-4">Inventory Management Quiz</h1>
+            <p class="text-center text-gray-600 dark:text-gray-400 mb-8">Test your knowledge on inventory management business rules and attributes. Click the button below to begin.</p>
+            <button id="start-btn" class="w-full bg-blue-600 text-white py-3 px-6 rounded-lg font-semibold text-lg hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-300 dark:focus:ring-blue-800 transition-transform transform hover:scale-105">
+                Start Quiz
+            </button>
+            <p id="user-id-display" class="text-sm text-gray-500 dark:text-gray-400 mt-4 text-center">User ID: Loading...</p>
+        </div>
+
+        <!-- Quiz Questions Screen -->
+        <div id="question-screen" class="hidden">
+            <div class="mb-6">
+                <p id="progress-text" class="text-sm text-gray-500 dark:text-gray-400">Question 1 of 75</p>
+                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 mt-1">
+                    <div id="progress-bar" class="bg-blue-600 h-2.5 rounded-full" style="width: 0%"></div>
+                </div>
+            </div>
+            <h2 id="question-text" class="text-xl sm:text-2xl font-semibold mb-6 min-h-[120px]">Question text goes here...</h2>
+            <div id="options-container" class="grid grid-cols-1 gap-4">
+                <!-- Options will be dynamically inserted here -->
+            </div>
+            <!-- Explanation Container (hidden by default) -->
+            <div id="explanation-container" class="mt-6 p-4 bg-blue-50 dark:bg-blue-900 rounded-lg hidden">
+                <h3 class="font-bold text-blue-800 dark:text-blue-200 mb-2">💡 Explanation</h3>
+                <p id="explanation-text" class="text-sm text-blue-700 dark:text-blue-300"></p>
+                <div id="explanation-loading" class="text-center py-2 hidden">
+                    <div class="loading-spinner"></div> Loading explanation...
+                </div>
+            </div>
+            <button id="submit-btn" class="w-full mt-8 bg-gray-300 text-gray-600 py-3 px-6 rounded-lg font-semibold text-lg cursor-not-allowed" disabled>
+                Submit Answer
+            </button>
+        </div>
+
+        <!-- Quiz Results Screen -->
+        <div id="results-screen" class="hidden text-center">
+            <h1 class="text-3xl sm:text-4xl font-bold text-blue-600 dark:text-blue-400 mb-4">Quiz Complete!</h1>
+            <p class="text-xl text-gray-700 dark:text-gray-300 mb-2">Your Final Score:</p>
+            <p id="score-text" class="text-5xl font-bold mb-6">0 / 0</p>
+            <p id="feedback-text" class="text-lg mb-8"></p>
+            <div id="results-summary" class="text-left mb-8 max-h-80 overflow-y-auto p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                <!-- Results summary will be dynamically inserted here -->
+            </div>
+            <button id="restart-btn" class="w-full bg-blue-600 text-white py-3 px-6 rounded-lg font-semibold text-lg hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-300 dark:focus:ring-blue-800 transition-transform transform hover:scale-105">
+                Take Again
+            </button>
+            <p id="results-save-status" class="text-sm text-gray-500 dark:text-gray-400 mt-4">
+                <span id="save-spinner" class="loading-spinner hidden"></span>
+                <span id="save-message"></span>
+            </p>
+        </div>
+    </div>
+
+    <script>
+        const quizData = [
+            {
+                question: "1: A field staff member is inventorying a new bench found in a public green space. It is constructed with recycled plastic planks for the seating surface and a metal frame for support. Based on the provided 'Attributes,' what is the most appropriate classification for its 'Surface Material' and 'Structure Material'?",
+                options: ["A) Surface Material: Wood, Structure Material: Metal", "B) Surface Material: Composite, Structure Material: Metal", "C) Surface Material: Plastic, Structure Material: Aggregate Finish", "D) Surface Material: Unknown, Structure Material: Unknown"],
+                answer: "B) Surface Material: Composite, Structure Material: Metal"
+            },
+            {
+                question: "2: During an inventory, a field staff member encounters a location where an old, damaged bench has been removed and a brand-new bench has been installed in its exact place. According to the 'Business Rules,' what is the correct procedure for updating the inventory for this location?",
+                options: ["A) Add the new bench as a new asset, but do not make any changes to the old bench's record.", "B) Mark the old bench's record with a Condition of \"Remove\" and then add (collect) the newly installed bench as a separate entry.", "C) Simply update the existing record of the old bench with the new bench's details and condition.", "D) Do not inventory the new bench until the old one's removal is officially confirmed by another department."],
+                answer: "B) Mark the old bench's record with a Condition of \"Remove\" and then add (collect) the newly installed bench as a separate entry."
+            },
+            {
+                question: "3: A field staff member is tasked with inventorying a new bicycle parking structure that allows multiple bicycles to be securely attached and features an elaborate, sculpted design that enhances the aesthetics of the public plaza. Based on the 'Attributes,' what is the most appropriate classification for its 'Type'?",
+                options: ["A) Type: Single", "B) Type: Multi", "C) Type: Decorative Multi", "D) Type: Unknown"],
+                answer: "C) Type: Decorative Multi"
+            },
+            {
+                question: "4: While inventorying bicycle racks, a field staff member observes several \"inverted U\" style racks placed individually, but in a neat row, allowing multiple bicycles to be parked along a sidewalk. According to the \"Business Rules,\" how should these be identified in terms of their arrangement?",
+                options: ["A) They should be classified as \"Multi\" bike racks because they are arranged to hold many bikes.", "B) They are \"Single\" bike racks that are arranged close to one another in lines.", "C) They are \"Decorative Multi\" racks due to their organized arrangement.", "D) This arrangement falls under \"Unknown\" as the rule only mentions \"multi bike racks are affixed together.\""],
+                answer: "B) They are \"Single\" bike racks that are arranged close to one another in lines."
+            },
+            {
+                question: "5: A field staff member is inventorying a bollard that is designed to prevent vehicle access to a park pathway, but also has a hinged mechanism allowing it to be lowered for occasional maintenance vehicle entry. Based on the provided 'Attributes,' what is the most appropriate classification for its 'Type'?",
+                options: ["A) Type: Standard", "B) Type: T-Gate", "C) Type: Knock Down", "D) Type: Ornamental"],
+                answer: "C) Type: Knock Down"
+            },
+            {
+                question: "6: During an inspection, a field staff member finds a movable bollard where the locking mechanism is entirely missing, making it unable to secure its position properly. According to the 'Business Rules,' how should its condition be noted?",
+                options: ["A) As 'Substandard' due to its compromised functionality.", "B) As 'Unknown' since the specific part is not an 'Attribute'.", "C) As 'Missing Part - Major - Not Affect Stability'.", "D) As a 'Standard' bollard, as long as it's still upright."],
+                answer: "A) As 'Substandard' due to its compromised functionality."
+            },
+            {
+                question: "7: While conducting an inventory, a field staff member observes a water fountain in a park that is continuously dripping water from its base, forming a small puddle. According to the 'Business Rules,' what is the required action for this observation?",
+                options: ["A) Simply note down that the drinking fountain is not functional.", "B) It requires a 311 call to inform the appropriate personnel about the leaking fountain.", "C) Attempt to repair the leak immediately.", "D) Ignore the leak, as long as water is still dispensing on demand."],
+                answer: "B) It requires a 311 call to inform the appropriate personnel about the leaking fountain."
+            },
+            {
+                question: "8: A field staff member is inventorying a fire fixture that is a prefabricated metal ring designed for open fires, commonly found in City of Edmonton parks. Based on the provided 'Attributes,' what is the most appropriate classification for its 'Type'?",
+                options: ["A) Type: Picnic Stove", "B) Type: Fire Pit", "C) Type: Fire Ring", "D) Type: Fireplace"],
+                answer: "C) Type: Fire Ring"
+            },
+            {
+                question: "9: When assessing the condition of a long-standing fire pit, a field staff member notes that it is quite sooty and has some rust spots on its metal components. According to the 'Business Rules,' how should this observation influence the condition assessment?",
+                options: ["A) The fire pit should be marked as 'Substandard' due to its aesthetic issues.", "B) The sooty and rusted appearance means its condition may still be quite good, as functionality is more important than aesthetics for fire fixtures.", "C) A 311 call is required to report the rust.", "D) The fire pit should be flagged for immediate removal and replacement."],
+                answer: "B) The sooty and rusted appearance means its condition may still be quite good, as functionality is more important than aesthetics for fire fixtures."
+            },
+            {
+                question: "10: A field staff member is tasked with inventorying a flag pole. The flag currently hoisted on the pole is tattered and faded. According to the 'Business Rules,' what part of the asset should be assessed?",
+                options: ["A) Both the flag pole and the flag should be assessed for condition.", "B) Only the flag should be assessed, as it is the most visible component.", "C) Only the flag pole itself should be assessed, as flags can be replaced at any time.", "D) Neither the flag pole nor the flag needs assessment if the flag is tattered."],
+                answer: "C) Only the flag pole itself should be assessed, as flags can be replaced at any time."
+            },
+            {
+                question: "11: A field staff member is inventorying a light fixture. They notice it is a decorative lamp post illuminating a park pathway, but upon closer inspection, they realize it is located within the boundaries of an area managed by the \"STL POLE layer\" (Streetlight Pole Layer). According to the \"Business Rules,\" what action should the field staff take regarding this light fixture?",
+                options: ["A) Collect and assess the light fixture as usual, noting its decorative type.", "B) Collect the light fixture, but only assess its material, not its type.", "C) Do not collect or assess this light fixture as it is on the STL POLE layer.", "D) Take a picture of the light fixture, but do not collect any other attributes."],
+                answer: "C) Do not collect or assess this light fixture as it is on the STL POLE layer."
+            },
+            {
+                question: "12: A field staff member is attempting to inventory a light fixture in a park. The fixture has an enclosed design, making it impossible to visually identify the type of light bulb (LUMINAIRE_TYPE) it uses without disassembling it. According to the 'Business Rules,' what should be recorded for the 'LUMINAIRE_TYPE' attribute?",
+                options: ["A) Guess the most common LUMINAIRE_TYPE for similar fixtures.", "B) Leave the LUMINAIRE_TYPE attribute blank.", "C) Record the LUMINAIRE_TYPE as 'Unknown'.", "D) Attempt to open the fixture to identify the bulb type."],
+                answer: "C) Record the LUMINAIRE_TYPE as 'Unknown'."
+            },
+            {
+                question: "13: Based on the provided attributes for Litter/Waste Containers, which of these is *not* a listed 'Waste Type'?\nGarbage\nRecycling\nSmoking Material\nOrganic Waste",
+                options: ["A) Garbage", "B) Recycling", "C) Smoking Material", "D) Organic Waste"],
+                answer: "D) Organic Waste" // Assuming 'Organic Waste' is the one not listed, as it's typically separate from general garbage, recycling, or smoking material disposal.
+            },
+            {
+                question: "14: According to the business rules for Litter/Waste Containers, if a container already exists on the \"Z- Garbage Can layer,\" what action should be taken regarding its 'Asset Present' status and field notes?",
+                options: ["A) Set Asset Present - Active, and field note Existing", "B) Set Asset Present - New, and field note Verified", "C) Set Asset Present - Removed, and field note Duplicate", "D) Set Asset Present - Repaired, and field note Checked"],
+                answer: "A) Set Asset Present - Active, and field note Existing"
+            },
+            {
+                question: "15: When a phone is *not* an Emergency (Bluefone), what specific check should be performed to confirm if the phone is working?",
+                options: ["A) Check for visual phone distresses", "B) Call 911", "C) Confirm the dial tone", "D) Shake to check a loose base"],
+                answer: "C) Confirm the dial tone"
+            },
+            {
+                question: "16: According to the provided business rules for public and emergency phones, which *type* of phone is the only one that should be condition rated?",
+                options: ["A) Emergency (Bluefone)", "B) Neither type, as they are regularly tested", "C) Both Emergency and Public Phones", "D) Public Phone"],
+                answer: "D) Public Phone"
+            },
+            {
+                question: "17: According to the business rules for plaques, what is the primary requirement for the photo taken of a plaque?",
+                options: ["A) Only a clear and legible image of the plaque itself is required, without the base or surrounding elements.", "B) A wide-angle shot covering the plaque and the asset it is attached to is preferred.", "C) The photo should include the plaque, its base structure, and the immediate surroundings for context.", "D) Photos are optional if the text attribute is fully transcribed."],
+                answer: "C) The photo should include the plaque, its base structure, and the immediate surroundings for context."
+            },
+            {
+                question: "18: When transcribing the 'Text' attribute for a plaque, what is the guideline regarding the level of detail required?",
+                options: ["A) A brief summary of the plaque's content is sufficient, without including any specific names.", "B) It is not necessary to type it all verbatim; instead, capture the central theme or relevant names.", "C) Only the first line of text needs to be captured for identification purposes.", "D) The text must be transcribed verbatim, exactly as it appears on the plaque."],
+                answer: "D) The text must be transcribed verbatim, exactly as it appears on the plaque."
+            },
+            {
+                question: "19: Based on the description, which of the following is *not* a stated purpose or application for Pre-fabricated curb/barrier?",
+                options: ["A) Protecting pedestrians and workers during construction.", "B) Providing a permanent artistic installation.", "C) Separating traffic or acting as a parking stopper.", "D) Minimizing vehicle damage while preventing crossover or head-on collision."],
+                answer: "B) Providing a permanent artistic installation."
+            },
+            {
+                question: "20: Which of the following is *not* listed as a valid 'Type' attribute for Prefab Curbing?",
+                options: ["A) Jersey Barrier", "B) Parking Stopper", "C) Speed Bump", "D) Mini Barrier"],
+                answer: "C) Speed Bump"
+            },
+            {
+                question: "21: According to the business rules for signs, for which specific category of signs is taking a picture *not* required?",
+                options: ["A) Third Party signs", "B) Park signs", "C) Neighborhood entry signs", "D) Regulatory signs"],
+                answer: "A) Third Party signs"
+            },
+            {
+                question: "22: If a bare post is encountered in the field with no signs attached to it, how should it be inventoried according to the business rules?",
+                options: ["A) It should be ignored and not collected.", "B) It should be updated as a \"Bare Post\" type sign.", "C) It should be inventoried as \"Missing\" and a picture must be attached.", "D) It should be collected as a 'Structure' asset without any associated picture."],
+                answer: "B) It should be updated as a \"Bare Post\" type sign."
+            },
+            {
+                question: "23: What is the business rule regarding updating existing third-party signs in the field?",
+                options: ["A) Always update third-party signs if their condition has changed.", "B) Only update third-party signs if they are critical for public safety.", "C) Do not update existing third-party signs in the field.", "D) Update third-party signs only if they have new messaging."],
+                answer: "C) Do not update existing third-party signs in the field."
+            },
+            {
+                question: "24: To distinguish between a Foul Pole and a Tetherball Pole in the field, which of the following characteristics or locations is *most* indicative of a Tetherball Pole?",
+                options: ["A) It is generally taller than other sports fixtures.", "B) It is made exclusively of metal.", "C) It is typically found near a baseball field.", "D) It usually has a ring at the top where a rope can be tied, and is found around playgrounds."],
+                answer: "D) It usually has a ring at the top where a rope can be tied, and is found around playgrounds."
+            },
+            {
+                question: "25: What is the collection rule for 'Outdoor Exercise Equipment' regarding its location within playground polygons?",
+                options: ["A) Outdoor Exercise Equipment should not be collected if it is inside playground polygons.", "B) Outdoor Exercise Equipment should be collected even if it is located within playground polygons.", "C) Collection of Outdoor Exercise Equipment depends on its material type if within a playground.", "D) Outdoor Exercise Equipment should only be collected if it is outside of playground polygons."],
+                answer: "B) Outdoor Exercise Equipment should be collected even if it is located within playground polygons."
+            },
+            {
+                question: "26: According to the business rules for Statues/Art, what is a key directive regarding their collection location relative to buildings?",
+                options: ["A) Only features inside historical buildings are permitted for collection.", "B) Never collect features that are located inside a building.", "C) Collection inside a building is allowed with prior confirmation from the office.", "D) Features located inside a building should always be collected if publicly accessible."],
+                answer: "B) Never collect features that are located inside a building."
+            },
+            {
+                question: "27: What is the fundamental requirement regarding photography when collecting Statues/Art features?",
+                options: ["A) Photos are only necessary if the 'Artist' attribute can be identified.", "B) Photos must always be taken for each Statues/Art feature collected.", "C) Photos are only required if the asset exhibits visible distress.", "D) Photos are optional for smaller art pieces or statues."],
+                answer: "B) Photos must always be taken for each Statues/Art feature collected."
+            },
+            {
+                question: "28: According to the business rules for Tables (PTB), how should any surrounding seating be treated during collection, irrespective of whether it's physically attached to the table or not?",
+                options: ["A) Seating should always be collected as a separate asset distinct from the table.", "B) The seating is considered an integral part of the table and should be collected as one asset with the table.", "C) Only seating that is physically attached to the table is considered part of it.", "D) Seating is only included with the table if it is in good condition."],
+                answer: "A) Seating should always be collected as a separate asset distinct from the table."
+            },
+            {
+                question: "29: Which of the following materials is *not* listed as a valid option for either 'Surface Material' or 'Structure Material' of Tables (PTB)?",
+                options: ["A) Composite", "B) Concrete", "C) Glass", "D) Wood"],
+                answer: "C) Glass"
+            },
+            {
+                question: "30: According to the business rules for Utility Points, which positions of utilities should be collected?",
+                options: ["A) Only utilities with an identified purpose should be collected.", "B) Only Surface and Overhead utilities.", "C) All utilities, regardless of their position, if they are within the park boundary.", "D) Underground, Surface, and Overhead utilities."],
+                answer: "D) Underground, Surface, and Overhead utilities."
+            },
+            {
+                question: "31: What is the business rule regarding the collection of utilities that are attached to buildings?",
+                options: ["A) They can be collected if confirmation from the office is obtained.", "B) They should be collected if their purpose is obvious and essential.", "C) Do not collect utilities attached to buildings.", "D) Utilities attached to buildings should always be collected if they serve a park asset."],
+                answer: "C) Do not collect utilities attached to buildings."
+            },
+            {
+                question: "32: In a parking lot with a low utility fence containing multiple electrical plugins, what is the correct collection procedure for these plugins?",
+                options: ["A) Collect them as a single Utility Line feature.", "B) Do not collect these plugins at all, as they are part of a fence.", "C) Collect each individual plugin as a separate Utility Point.", "D) Collect only one plugin as a representative point for all."],
+                answer: "C) Collect each individual plugin as a separate Utility Point."
+            },
+            {
+                question: "33: When a utility is embedded in a surface (like a curb, pad, road, or trail) and causes distress to that surface, how should the condition assessment be handled?",
+                options: ["A) Condition the utility only, and do not condition the other embedded feature.", "B) Report the distress to 311, and no condition assessment is needed for either feature.", "C) Condition both the utility and the distressed surface feature.", "D) Condition only the distressed surface feature, not the utility."],
+                answer: "C) Condition both the utility and the distressed surface feature."
+            },
+            {
+                question: "34: For EPCOR and City owned power utility boxes within parkland that are observed to have access to their interior (a serious safety hazard), what immediate action should be taken?",
+                options: ["A) Mark the asset as 'Removed' and take a picture.", "B) Physically secure the box to prevent further access.", "C) Mark the asset as 'Yes- Not Assessed' and continue collection.", "D) Report the issue to 311 or the utility company emergency phone number."],
+                answer: "D) Report the issue to 311 or the utility company emergency phone number."
+            },
+            {
+                question: "35: According to the business rules for Entrance Features, should these features be collected if they are located on private property?",
+                options: ["A) Yes, they should be collected whether on city land or private property.", "B) Only if the private property owner provides explicit permission.", "C) It depends on whether the feature is a 'Historical Resource'.", "D) No, only features on city land should be collected."],
+                answer: "D) No, only features on city land should be collected."
+            },
+            {
+                question: "36: Which type of entrance feature should *not* be collected according to the business rules?",
+                options: ["A) An entrance feature with an 'Unknown' Feature Type.", "B) An entrance feature for a residential subdivision.", "C) An entrance feature for a condo complex or business facility.", "D) An entrance feature for a public park."],
+                answer: "C) An entrance feature for a condo complex or business facility."
+            },
+            {
+                question: "37: According to the business rules for Graffiti, what is the mandatory requirement regarding photography for all observed graffiti?",
+                options: ["A) Photos are only needed if the graffiti covers a large area.", "B) It is optional to take a photo if the graffiti is 'General'.", "C) A photo must be taken of all observed graffiti, regardless of its type.", "D) Photos are only required for graffiti identified as ‘Offensive’."],
+                answer: "C) A photo must be taken of all observed graffiti, regardless of its type."
+            },
+            {
+                question: "38: If graffiti is classified as 'Offensive' according to the attributes, what specific action is required based on the business rules?",
+                options: ["A) It needs to be reported to 311.", "B) A note should be made in the field, and the office will decide on reporting.", "C) It should be marked as 'Graffiti - General' to avoid unnecessary reporting.", "D) It should be immediately cleaned or removed by field staff."],
+                answer: "A) It needs to be reported to 311."
+            },
+            {
+                question: "39: According to the business rules, what is the key difference in condition assessment for structural versus non-structural bridges?",
+                options: ["A) Non-structural bridges (e.g., boardwalks) should have their condition assessed, while structural bridges should have attributes updated but *not* their condition assessed.", "B) Both structural and non-structural bridges require a full condition assessment.", "C) No bridges are assessed for condition, as inspections are completed by another group.", "D) Only structural bridges are assessed for condition, as non-structural ones are regularly replaced."],
+                answer: "A) Non-structural bridges (e.g., boardwalks) should have their condition assessed, while structural bridges should have attributes updated but *not* their condition assessed."
+            },
+            {
+                question: "40: If a bridge connects to another linear feature, such as a trail, what is the required action regarding its geometry and feature collection?",
+                options: ["A) Only the bridge should be collected, and the connecting linear feature can be ignored.", "B) The bridge should be merged with the connecting linear feature into a single geometry.", "C) The bridge and the connecting feature should be collected as one continuous feature, but their types should be differentiated.", "D) The feature needs to be split into two separate features and geometries at the connection point."],
+                answer: "D) The feature needs to be split into two separate features and geometries at the connection point."
+            },
+            {
+                question: "41: How should a gutter with no curbing attached be collected, according to the business rules?",
+                options: ["A) It should be collected as a standard 'Curb and Gutter' feature with its curbing attribute set to 'None'.", "B) It should be reported as a missing curb component to 311.", "C) It should not be collected as it's not a complete curb feature.", "D) It should be collected as a utility line type 'swale', as it is meant for drainage only."],
+                answer: "D) It should be collected as a utility line type 'swale', as it is meant for drainage only."
+            },
+            {
+                question: "42: According to the business rules for Curb/Curb & Gutter, under what condition is curbing along trails or pads *not* collected?",
+                options: ["A) If it is along the inside of a trail or enclosing a bed.", "B) If it is a new installation.", "C) If it is always exposed along the trail/pad.", "D) If it has a height greater than 30 cm."],
+                answer: "A) If it is along the inside of a trail or enclosing a bed."
+            },
+            {
+                question: "43: When encountering a fence with multiple segments, under what specific condition should the fence be collected as *two separate features* instead of a single continuous one?",
+                options: ["A) When the height or material of the fence changes.", "B) Never; all fence segments on the same continuous line should be collected as one feature.", "C) When the fence has more than 50 posts in a single segment.", "D) When the gap between two posts is large enough for a person to fit through and is used as an access."],
+                answer: "A) When the height or material of the fence changes."
+            },
+            {
+                question: "43: What are the specific collection and assessment rules for 'Guard Rails' and 'Sound Walls' as types of fences?",
+                options: ["A) Neither Guard Rails nor Sound Walls should be collected or updated.", "B) Guard Rails are no longer collected or updated, while Sound Walls should have their geometry collected/updated but not their condition assessed.", "C) Both Guard Rails and Sound Walls should be collected and their condition assessed.", "D) Both types are collected, but only Guard Rails are condition assessed."],
+                answer: "B) Guard Rails are no longer collected or updated, while Sound Walls should have their geometry collected/updated but not their condition assessed."
+            },
+            {
+                question: "44: Under what specific condition should a wall that typically serves as a retaining structure be collected as a 'fence' with 'type wall'?",
+                options: ["A) If it is made of an unknown material.", "B) If it is located within a playground area.", "C) If its height is less than 0.5 meters.", "D) If it is not retaining anything."],
+                answer: "D) If it is not retaining anything."
+            },
+            {
+                question: "45: If a 'Bed Enclosure' type of Retaining Structure is found to be less than 30 cm in height, how should it be inventoried instead?",
+                options: ["A) As a 'Wall' type of Retaining Structure.", "B) It should not be inventoried if it's too small.", "C) As a 'Curbing Feature' with the Type: 'Bed Enclosure'.", "D) It should be removed from the inventory if it's not performing a retaining function."],
+                answer: "C) As a 'Curbing Feature' with the Type: 'Bed Enclosure'."
+            },
+            {
+                question: "46: Which of the following is *not* a listed 'Type' attribute for 'Sports Fixtures Line'?",
+                options: ["A) Goal Posts", "B) Backstop with Canopy", "C) Teaching Station", "D) Tennis Net"],
+                answer: "B) Backstop with Canopy"
+            },
+            {
+                question: "47: Which of the following is *not* a listed 'Material' attribute for Sports Fixtures Line?",
+                options: ["A) Metal", "B) Concrete", "C) Wood", "D) Plastic"],
+                answer: "D) Plastic"
+            },
+            {
+                question: "48: What is the business rule regarding the condition assessment of Stair Features?",
+                options: ["A) All Stair Features must be collected and their condition assessed in detail.", "B) Condition assessment is optional and left to the discretion of the field team.", "C) Only Stair Features with visible distress should have their condition assessed.", "D) Stair Features should be collected, but their condition should not be assessed."],
+                answer: "D) Stair Features should be collected, but their condition should not be assessed."
+            },
+            {
+                question: "49: When recording the 'Number of Stairs' attribute for a Stair Feature, what is the specific instruction for counting the steps?",
+                options: ["A) Count each artificial step, but do not count the ground as a step.", "B) Estimate the total number of steps based on the physical length of the stairs.", "C) Count only the risers, not the treads.", "D) Count all portions of the stairway, including the ground level at the top and bottom."],
+                answer: "A) Count each artificial step, but do not count the ground as a step."
+            },
+            {
+                question: "50: Based on the description and attributes, what is identified as the *most common form* of Utility Lines, and what is its primary purpose?",
+                options: ["A) Power lines, used for electricity transmission.", "B) Manholes, used for underground access.", "C) Swales, used to direct surface runoff.", "D) Access hatches, used for general utility access."],
+                answer: "C) Swales, used to direct surface runoff."
+            },
+            {
+                question: "51: Besides 'Swale', what other specific 'Object Type' is listed for Utility Lines?",
+                options: ["A) Line", "B) Duct Bank", "C) Culvert", "D) Manhole"],
+                answer: "B) Duct Bank"
+            },
+            {
+                question: "52: According to the \"Notifications\" list, what action is mandatory for any observed 'Safety Hazard' (including Protruding Parts or a Support structure about to collapse)?",
+                options: ["A) Log it as an 'Other' notification if its severity is low.", "B) Attempt to resolve the hazard immediately if possible.", "C) Report to 311.", "D) Document it with a photograph and a detailed description, then send it to the office."],
+                answer: "C) Report to 311."
+            },
+            {
+                question: "53: Among the different types of Graffiti listed under \"Notifications,\" which specific type requires reporting to 311?",
+                options: ["A) Both 'Graffiti - General' and 'Graffiti - Offensive'.", "B) Neither type, as graffiti is handled by a separate cleaning crew.", "C) Graffiti - General", "D) Graffiti - Offensive"],
+                answer: "D) Graffiti - Offensive"
+            },
+            {
+                question: "54: According to the note in the 'Attributes' section for Beds, what is the sole basis for determining the bed's condition?",
+                options: ["A) The overall health and density of the vegetation within the bed.", "B) A combination of surface material condition and the percentage of living plant coverage.", "C) The condition of the surrounding structure that raises the bed.", "D) Only the surface material of the bed, as vegetation condition is irrelevant to the rating."],
+                answer: "D) Only the surface material of the bed, as vegetation condition is irrelevant to the rating."
+            },
+            {
+                question: "55: For a typical raised bed, how should the surrounding material (e.g., curbing or retaining walls) that forms the raised structure be collected, and how should its damage be reflected?",
+                options: ["A) The surrounding material should always be collected as a separate curbing or retaining wall asset.", "B) It should not be collected at all, and its damage is irrelevant to the bed's condition.", "C) The surrounding material should *not* be collected as a separate asset, but its damage should be reflected in the condition of the bed asset.", "D) It should be collected as a separate asset only if it is significantly damaged."],
+                answer: "C) The surrounding material should *not* be collected as a separate asset, but its damage should be reflected in the condition of the bed asset."
+            },
+            {
+                question: "56: According to the provided descriptions, what is the defining characteristic of 'PERMANENT' bleachers?",
+                options: ["A) They are securely installed into the ground.", "B) They are typically found indoors.", "C) They can be easily moved to different locations.", "D) They are made primarily of wood."],
+                answer: "A) They are securely installed into the ground."
+            },
+            {
+                question: "57: What feature is explicitly mentioned as common to *both* 'PERMANENT' and 'PORTABLE' bleachers in their descriptions?",
+                options: ["A) They are both primarily made of metal.", "B) They both often have stairways providing access to the horizontal rows of seats.", "C) They are both found exclusively indoors.", "D) They are both securely installed into the ground."],
+                answer: "B) They both often have stairways providing access to the horizontal rows of seats."
+            },
+            {
+                question: "58: What is the key differentiating factor between a 'Deck/Raised Platform' and a 'Pad', according to the business rules?",
+                options: ["A) Decks are made of wood, while pads are made of concrete.", "B) Decks are found at viewpoints, whereas pads are only in parking lots.", "C) A deck is elevated from the ground or on it, rather than being flush into the ground like a pad.", "D) Pads are always larger in area than decks."],
+                answer: "C) A deck is elevated from the ground or on it, rather than being flush into the ground like a pad."
+            },
+            {
+                question: "59: How should 'rails on decks' be collected, specifically when they extend beyond the deck area?",
+                options: ["A) Rails on decks are always collected as part of the Deck feature.", "B) They should be collected as a 'Fence' once they leave the deck area.", "C) They are considered separate 'Railing' assets regardless of location.", "D) Only rails that are attached to the deck structure are collected."],
+                answer: "B) They should be collected as a 'Fence' once they leave the deck area."
+            },
+            {
+                question: "60: For a boat launch located at the bottom of a Storm Water Management Facilities (SWMF) access road, how should it be collected, especially if the material is consistent from the pond all the way to the top of the access road?",
+                options: ["A) If the material is the same from the pond all the way to the top, the entire feature should only be collected as 'Boat Launch Decks'.", "B) The access road should be collected as a 'Trail', and the boat launch collected as a 'Deck (Boat Launch)'.", "C) The entire feature, including the access road, should be collected as a 'Trail'.", "D) It should not be collected if it's part of a Storm Water Management Facility."],
+                answer: "B) The access road should be collected as a 'Trail', and the boat launch collected as a 'Deck (Boat Launch)'."
+            },
+            {
+                question: "61: What is the specific business rule regarding the inspection of 'Pond fountains' under Hydro Features?",
+                options: ["A) Inspection of pond fountains requires confirmation from the office.", "B) Pond fountains must be inspected regularly for water quality.", "C) Pond fountains are not inspected.", "D) Pond fountains are to be inspected only if they are part of an 'Ornamental Pond'."],
+                answer: "C) Pond fountains are not inspected."
+            },
+            {
+                question: "62: Based on the description of 'Hydro Features', which of the following water-related assets are explicitly *excluded* from this category?",
+                options: ["A) Dry ponds and natural springs.", "B) Fountains and ornamental ponds.", "C) Natural creeks and ponds.", "D) Drinking fountains, spray parks, and spray decks."],
+                answer: "D) Drinking fountains, spray parks, and spray decks."
+            },
+            {
+                question: "63: According to the business rules for Open Space Structures, what is the mandatory requirement regarding photography?",
+                options: ["A) Photos are optional, depending on the structure's size.", "B) Photos are only necessary if the 'Type' attribute is 'Unknown'.", "C) A picture must be taken for all Open Space Structures.", "D) Photos are only required if the structure is in poor condition."],
+                answer: "C) A picture must be taken for all Open Space Structures."
+            },
+            {
+                question: "64: Based on the description, what are the two defining characteristics that classify a structure as an 'Open Space Structure'?",
+                options: ["A) It is a permanent outdoor structure that provides shelter and protection, and is not fully enclosed.", "B) It is a temporary indoor structure that provides privacy.", "C) It is a fully enclosed outdoor structure primarily for storage.", "D) It is an indoor structure, either temporary or permanent, used for public gatherings."],
+                answer: "A) It is a permanent outdoor structure that provides shelter and protection, and is not fully enclosed."
+            },
+            {
+                question: "65: Which of the following is *not* a listed 'Type' attribute for Open Space Structures?",
+                options: ["A) Carport", "B) Sunshade", "C) Pavilion", "D) Gazebo"],
+                answer: "A) Carport"
+            },
+            {
+                question: "66: What are the collection rules for 'shale pads' specifically located on baseball fields or under player benches in sports fields?",
+                options: ["A) Only collect shale pads on baseball fields if they are causing a trip hazard, otherwise ignore.", "B) Don't collect shale pads on baseball fields. If shale pads under player benches were previously collected, they should be removed and collected as a 'sports fixture polygon'.", "C) All shale pads in sports fields, including those under player benches, should be collected as 'Pad' type.", "D) Shale pads on baseball fields should always be collected, but their condition is optional; those under player benches should be collected as 'Pad' type."],
+                answer: "B) Don't collect shale pads on baseball fields. If shale pads under player benches were previously collected, they should be removed and collected as a 'sports fixture polygon'."
+            },
+            {
+                question: "67: How should 'utility pads' be collected and assessed for condition, particularly when they are only supporting a utility and located within Parkland Boundary versus outside?",
+                options: ["A) Do not collect utility pads at all if they are only supporting a utility, as they are part of the utility asset.", "B) Only collect condition information for utility pads if they are causing a trip hazard.", "C) Collect utility pads and always collect condition information for them, regardless of boundary.", "D) Collect utility pads, but do not collect condition information if they are only supporting the utility and are *within* Parkland Boundary; outside of boundary, the supporting structure can be ignored."],
+                answer: "D) Collect utility pads, but do not collect condition information if they are only supporting the utility and are *within* Parkland Boundary; outside of boundary, the supporting structure can be ignored."
+            },
+            {
+                question: "68: What is the collection rule for 'Outdoor Exercise Equipment' when found within playground polygons?",
+                options: ["A) Only collect Outdoor Exercise Equipment if it is outside of any playground polygon.", "B) Outdoor Exercise Equipment should not be collected if it's inside playground polygons, as it's already part of the playground.", "C) Collect Outdoor Exercise Equipment even if it is located within playground polygons, and note that it is a Sports Fixtures point feature.", "D) Its collection depends on whether the playground polygon is a 'Skateboard Park'."],
+                answer: "C) Collect Outdoor Exercise Equipment even if it is located within playground polygons, and note that it is a Sports Fixtures point feature."
+            },
+            {
+                question: "69: Which of the following is *not* listed as a valid 'Type' attribute for Playgrounds (PLG)?",
+                options: ["A) Spray Deck", "B) Sports Field", "C) Wading Pool", "D) Skateboard Park"],
+                answer: "B) Sports Field"
+            },
+            {
+                question: "70: What is the specific directive regarding the update/creation of 'Sports Fixtures Polygon' geometries and their condition assessment?",
+                options: ["A) Only the geometry should be updated/created for Sports Fixtures Polygons; their condition is not assessed by the field team.", "B) Sports Fixtures Polygons should only be collected if their condition is 'Very Good' or 'Good'.", "C) Only update and/or create the geometries of Sports Fixtures Polygons; their condition may differ depending on when the maintenance team put the shale on them.", "D) Both geometry and condition should always be updated for Sports Fixtures Polygons."],
+                answer: "C) Only update and/or create the geometries of Sports Fixtures Polygons; their condition may differ depending on when the maintenance team put the shale on them."
+            },
+            {
+                question: "71: What are the specific 'Material' and 'Type' attributes listed for 'Sports Fixtures Polygon' assets?",
+                options: ["A) Material: Rubber; Type: Sports Court", "B) Material: Concrete; Type: Surface Area", "C) Material: Shale; Type: Shale Surface Area", "D) Material: Wood; Type: Playing Field"],
+                answer: "C) Material: Shale; Type: Shale Surface Area"
+            },
+            {
+                question: "72: When other features (including pads) are located *within* a Sports Field, how should they be collected?",
+                options: ["A) They should only be collected if they are a 'Trip Hazard'.", "B) Their collection depends on their specific material type.", "C) They should be collected as normal.", "D) They should be ignored as they are part of the larger sports field polygon."],
+                answer: "C) They should be collected as normal."
+            },
+            {
+                question: "73: According to the \"Utility Boxes Cheat Sheet\", under what combined circumstances should a utility box *not* be assessed at all, right at the initial steps?",
+                options: ["A) If its Object Type is unknown.", "B) If it is a City Owned Asset.", "C) If it does not have an EPCOR label.", "D) If it is outside the Parkland Boundary OR attached to a building or power pole."],
+                answer: "D) If it is outside the Parkland Boundary OR attached to a building or power pole."
+            },
+            {
+                question: "74: If a City Owned utility box is found knocked over, what specific action should be taken regarding the 'Maintenance Required' field? How does this differ for an EPCOR Owned box with the same issue?",
+                options: ["A) For City Owned, set Maintenance Required to 'Safety Hazard'. For EPCOR Owned, also set to 'Safety Hazard'.", "B) For both City and EPCOR Owned, call 311 immediately and mark as 'Removed'.", "C) For City Owned, set Maintenance Required to 'Safety Hazard'. For EPCOR Owned, call the utility company emergency number or 311, and *do not* fill out the Maintenance Required field.", "D) For City Owned, noted as 'Damaged Base'. For EPCOR Owned, ignore as it's their responsibility."],
+                answer: "C) For City Owned, set Maintenance Required to 'Safety Hazard'. For EPCOR Owned, call the utility company emergency number or 311, and *do not* fill out the 'Maintenance Required' field."
+            },
+            {
+                question: "75: If an EPCOR label on a utility box is unreadable or missing, what specific actions should be taken regarding the 'Object Type' and 'Maintenance Required' fields, and any reporting?",
+                options: ["A) Ignore the box and do not assess if the label is unreadable or missing.", "B) Set 'Object Type' to 'Unknown', take a picture, and fill out the 'Maintenance Required' field with observed issues.", "C) Set 'Object Type' to 'Unknown', take a picture, and report to 311. Do NOT fill out the 'Maintenance Required' field.", "D) Report to 311 to request a new label, then proceed with a full assessment."],
+                answer: "C) Set 'Object Type' to 'Unknown', take a picture, and report to 311. Do NOT fill out the 'Maintenance Required' field."
+            }
+        ];
+
+        // DOM elements
+        const startScreen = document.getElementById('start-screen');
+        const questionScreen = document.getElementById('question-screen');
+        const resultsScreen = document.getElementById('results-screen');
+        
+        const startBtn = document.getElementById('start-btn');
+        const submitBtn = document.getElementById('submit-btn');
+        const restartBtn = document.getElementById('restart-btn');
+
+        const questionText = document.getElementById('question-text');
+        const optionsContainer = document.getElementById('options-container');
+        const progressText = document.getElementById('progress-text');
+        const progressBar = document.getElementById('progress-bar');
+        
+        const explanationContainer = document.getElementById('explanation-container');
+        const explanationText = document.getElementById('explanation-text');
+        const explanationLoading = document.getElementById('explanation-loading');
+
+        const scoreText = document.getElementById('score-text');
+        const feedbackText = document.getElementById('feedback-text');
+        const resultsSummary = document.getElementById('results-summary');
+        const userIdDisplay = document.getElementById('user-id-display');
+        const saveStatus = document.getElementById('results-save-status');
+        const saveSpinner = document.getElementById('save-spinner');
+        const saveMessage = document.getElementById('save-message');
+
+        // Quiz state
+        let currentQuestionIndex = 0;
+        let score = 0;
+        let userAnswers = [];
+        let selectedOption = null;
+
+        // Event Listeners
+        startBtn.addEventListener('click', startQuiz);
+        submitBtn.addEventListener('click', submitAnswer);
+        restartBtn.addEventListener('click', startQuiz);
+
+        // Firebase-related variables (initialized globally in the module script)
+        let firebaseApp = null;
+        let db = null;
+        let auth = null;
+        let currentUserId = null;
+        let isAuthReady = false;
+
+        // Wait for Firebase to be ready
+        window.addEventListener('load', () => {
+            // Access global Firebase instances
+            firebaseApp = window.firebaseApp;
+            db = window.db;
+            auth = window.auth;
+            currentUserId = window.currentUserId;
+            isAuthReady = window.isAuthReady;
+
+            // Ensure userId is displayed once auth is ready
+            const updateUserIdDisplay = () => {
+                if (window.isAuthReady && window.currentUserId) {
+                    userIdDisplay.textContent = `User ID: ${window.currentUserId}`;
+                } else {
+                    // Poll until auth is ready if not immediately available
+                    setTimeout(updateUserIdDisplay, 100);
+                }
+            };
+            updateUserIdDisplay();
+        });
+
+
+        // Functions
+        function startQuiz() {
+            currentQuestionIndex = 0;
+            score = 0;
+            userAnswers = [];
+            selectedOption = null;
+            explanationContainer.classList.add('hidden'); // Hide explanation
+            
+            startScreen.classList.add('hidden');
+            resultsScreen.classList.add('hidden');
+            questionScreen.classList.remove('hidden');
+            saveStatus.classList.add('hidden'); // Hide save status
+            saveMessage.textContent = ''; // Clear save message
+            saveSpinner.classList.add('hidden'); // Hide spinner
+            
+            loadQuestion();
+        }
+
+        function loadQuestion() {
+            // Reset state from previous question
+            resetOptions();
+            submitBtn.disabled = true;
+            submitBtn.classList.add('cursor-not-allowed', 'bg-gray-300', 'text-gray-600');
+            submitBtn.classList.remove('bg-blue-600', 'text-white', 'hover:bg-blue-700');
+            submitBtn.textContent = 'Submit Answer';
+            explanationContainer.classList.add('hidden'); // Hide explanation for new question
+            explanationText.textContent = ''; // Clear previous explanation text
+            explanationLoading.classList.add('hidden'); // Hide loading spinner
+
+            if (currentQuestionIndex < quizData.length) {
+                const currentQuestion = quizData[currentQuestionIndex];
+                // Remove question number from the question text for display, but keep it in quizData
+                const displayQuestionText = currentQuestion.question.replace(/^\d+:\s*/, '');
+                questionText.textContent = displayQuestionText;
+                
+                // Update progress
+                progressText.textContent = `Question ${currentQuestionIndex + 1} of ${quizData.length}`;
+                progressBar.style.width = `${((currentQuestionIndex + 1) / quizData.length) * 100}%`;
+
+                // Create and display options
+                currentQuestion.options.forEach(optionText => {
+                    const optionElement = document.createElement('button');
+                    optionElement.textContent = optionText;
+                    optionElement.classList.add('option', 'w-full', 'p-4', 'border-2', 'rounded-lg', 'text-left', 'transition-colors', 'duration-200', 'hover:bg-blue-100', 'dark:hover:bg-gray-700', 'dark:border-gray-600');
+                    // Add a min-height to options to prevent layout shifts
+                    optionElement.style.minHeight = '60px'; // Adjust as needed
+                    optionElement.addEventListener('click', () => selectOption(optionElement, optionText));
+                    optionsContainer.appendChild(optionElement);
+                });
+            } else {
+                showResults();
+            }
+        }
+
+        function selectOption(element, text) {
+            // Remove selection from other options
+            Array.from(optionsContainer.children).forEach(child => {
+                child.classList.remove('selected');
+            });
+
+            // Select the new option
+            element.classList.add('selected');
+            selectedOption = text;
+
+            // Enable submit button
+            submitBtn.disabled = false;
+            submitBtn.classList.remove('cursor-not-allowed', 'bg-gray-300', 'text-gray-600');
+            submitBtn.classList.add('bg-blue-600', 'text-white', 'hover:bg-blue-700');
+        }
+
+        function resetOptions() {
+            while (optionsContainer.firstChild) {
+                optionsContainer.removeChild(optionsContainer.firstChild);
+            }
+        }
+
+        async function submitAnswer() {
+            const currentQuestion = quizData[currentQuestionIndex];
+            const isCorrect = selectedOption === currentQuestion.answer;
+            
+            userAnswers.push({
+                question: currentQuestion.question,
+                selected: selectedOption,
+                correct: currentQuestion.answer,
+                isCorrect: isCorrect
+            });
+
+            if (isCorrect) {
+                score++;
+            }
+            
+            highlightAnswers();
+
+            // If incorrect, fetch explanation
+            if (!isCorrect) {
+                await fetchExplanation(currentQuestion.question, currentQuestion.answer, selectedOption);
+            }
+            
+            submitBtn.disabled = true;
+            if (currentQuestionIndex < quizData.length - 1) {
+                 submitBtn.textContent = 'Next Question';
+                 setTimeout(() => {
+                    currentQuestionIndex++;
+                    loadQuestion();
+                }, !isCorrect ? 3000 : 1500); // Wait longer if explanation is shown
+            } else {
+                 submitBtn.textContent = 'Show Results';
+                 setTimeout(showResults, !isCorrect ? 3000 : 1500);
+            }
+        }
+        
+        function highlightAnswers() {
+            const currentQuestion = quizData[currentQuestionIndex];
+            Array.from(optionsContainer.children).forEach(button => {
+                button.disabled = true; // Disable all buttons
+                if (button.textContent === currentQuestion.answer) {
+                    button.classList.add('correct');
+                    button.classList.remove('selected');
+                } else if (button.textContent === selectedOption) {
+                    button.classList.add('incorrect');
+                    button.classList.remove('selected');
+                }
+            });
+        }
+
+        async function fetchExplanation(question, correctAnswer, userAnswer) {
+            explanationContainer.classList.remove('hidden');
+            explanationText.textContent = '';
+            explanationLoading.classList.remove('hidden');
+
+            const prompt = `Explain why the correct answer to the following multiple-choice question is '${correctAnswer}' and why '${userAnswer}' is incorrect.
+            Question: ${question}`;
+
+            try {
+                let chatHistory = [];
+                chatHistory.push({ role: "user", parts: [{ text: prompt }] });
+                const payload = { contents: chatHistory };
+                const apiKey = ""; // If you want to use models other than gemini-2.0-flash or imagen-3.0-generate-002, provide an API key here. Otherwise, leave this as-is.
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const result = await response.json();
+
+                if (result.candidates && result.candidates.length > 0 &&
+                    result.candidates[0].content && result.candidates[0].content.parts &&
+                    result.candidates[0].content.parts.length > 0) {
+                    const text = result.candidates[0].content.parts[0].text;
+                    explanationText.textContent = text;
+                } else {
+                    explanationText.textContent = "Could not retrieve an explanation. Please try again later.";
+                    console.error("Gemini API response structure unexpected:", result);
+                }
+            } catch (error) {
+                explanationText.textContent = "Error fetching explanation: " + error.message;
+                console.error("Error calling Gemini API:", error);
+            } finally {
+                explanationLoading.classList.add('hidden');
+            }
+        }
+
+
+        async function showResults() {
+            questionScreen.classList.add('hidden');
+            resultsScreen.classList.remove('hidden');
+
+            scoreText.textContent = `${score} / ${quizData.length}`;
+
+            // Provide feedback
+            const percentage = (score / quizData.length) * 100;
+            if (percentage === 100) {
+                feedbackText.textContent = "Perfect score! You're a true expert!";
+            } else if (percentage >= 80) {
+                feedbackText.textContent = "Excellent work! You have a strong understanding.";
+            } else if (percentage >= 60) {
+                feedbackText.textContent = "Good effort! You're on the right track.";
+            } else if (percentage >= 40) {
+                feedbackText.textContent = "Keep learning! You're getting there.";
+            } else {
+                feedbackText.textContent = "Time for some review! You can improve with more practice.";
+            }
+            
+            // Display results summary
+            resultsSummary.innerHTML = ''; // Clear previous results
+            userAnswers.forEach((answer, index) => {
+                const resultEl = document.createElement('div');
+                resultEl.classList.add('mb-4', 'p-3', 'rounded-lg', answer.isCorrect ? 'bg-green-100 dark:bg-green-900' : 'bg-red-100 dark:bg-red-900');
+                // Remove question number from the question text for display
+                const displayQuestionText = answer.question.replace(/^\d+:\s*/, '');
+                resultEl.innerHTML = `
+                    <p class="font-semibold">${index + 1}. ${displayQuestionText}</p>
+                    <p class="text-sm ${answer.isCorrect ? 'text-green-800 dark:text-green-200' : 'text-red-800 dark:text-red-200'}">Your answer: ${answer.selected}</p>
+                    ${!answer.isCorrect ? `<p class="text-sm text-gray-600 dark:text-gray-400">Correct answer: ${answer.correct}</p>` : ''}
+                `;
+                resultsSummary.appendChild(resultEl);
+            });
+
+            // Save results to Firestore
+            await saveQuizResults();
+        }
+
+        async function saveQuizResults() {
+            saveStatus.classList.remove('hidden');
+            saveSpinner.classList.remove('hidden');
+            saveMessage.textContent = 'Saving results...';
+
+            if (!db || !window.isAuthReady || !window.currentUserId) {
+                saveMessage.textContent = 'Failed to save results: Firebase not ready or user not authenticated.';
+                saveSpinner.classList.add('hidden');
+                console.error("Firestore not initialized or user not authenticated.");
+                return;
+            }
+
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+            const resultsCollectionPath = `/artifacts/${appId}/users/${window.currentUserId}/quiz_results`;
+
+            try {
+                // Prepare simplified user answers for storage (avoiding redundant full question text)
+                const simplifiedAnswers = userAnswers.map(ans => ({
+                    questionNum: parseInt(ans.question.split(':')[0]), // Extract question number
+                    selected: ans.selected,
+                    isCorrect: ans.isCorrect
+                }));
+
+                await addDoc(collection(db, resultsCollectionPath), {
+                    userId: window.currentUserId,
+                    score: score,
+                    totalQuestions: quizData.length,
+                    timestamp: window.firebase.firestore.FieldValue.serverTimestamp ? window.firebase.firestore.FieldValue.serverTimestamp() : new Date(), // Use serverTimestamp if available, otherwise local date
+                    answers: JSON.stringify(simplifiedAnswers) // Stringify complex array for Firestore doc
+                });
+                saveMessage.textContent = 'Results saved successfully!';
+                console.log("Quiz results saved to Firestore!");
+            } catch (e) {
+                saveMessage.textContent = `Failed to save results: ${e.message}`;
+                console.error("Error saving document: ", e);
+            } finally {
+                saveSpinner.classList.add('hidden');
+            }
+        }
+    </script>
+</body>
+</html>
