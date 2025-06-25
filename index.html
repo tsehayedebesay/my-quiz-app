@@ -21,7 +21,7 @@
 
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null; // Corrected: Use __initial_auth_token directly
 
         // Initialize Firebase app
         if (Object.keys(firebaseConfig).length > 0) {
@@ -140,7 +140,7 @@
         <!-- Quiz Questions Screen -->
         <div id="question-screen" class="hidden">
             <div class="mb-6">
-                <p id="progress-text" class="text-sm text-gray-500 dark:text-gray-400">Question 1 of 75</p>
+                <p id="progress-text" class="text-sm text-gray-500 dark:text-gray-400">Question 1 of 40</p>
                 <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2.5 mt-1">
                     <div id="progress-bar" class="bg-blue-600 h-2.5 rounded-full" style="width: 0%"></div>
                 </div>
@@ -182,7 +182,7 @@
     </div>
 
     <script>
-        const quizData = [
+        const allQuizData = [ // Renamed to allQuizData to differentiate from the randomized subset
             {
                 question: "1: A field staff member is inventorying a new bench found in a public green space. It is constructed with recycled plastic planks for the seating surface and a metal frame for support. Based on the provided 'Attributes,' what is the most appropriate classification for its 'Surface Material' and 'Structure Material'?",
                 options: ["A) Surface Material: Wood, Structure Material: Metal", "B) Surface Material: Composite, Structure Material: Metal", "C) Surface Material: Plastic, Structure Material: Aggregate Finish", "D) Surface Material: Unknown, Structure Material: Unknown"],
@@ -459,7 +459,7 @@
                 answer: "D) Only the surface material of the bed, as vegetation condition is irrelevant to the rating."
             },
             {
-                question: "55: For a typical raised bed, how should the surrounding material (e.g., curbing or retaining walls) that forms the raised structure be collected, and how should its damage be reflected?",
+                question: "55: For a typical raised bed, how should the surrounding material (e.g., curbing or retaining walls) that forms the raised structure be collected, and how should its damage be reflected?shallow",
                 options: ["A) The surrounding material should always be collected as a separate curbing or retaining wall asset.", "B) It should not be collected at all, and its damage is irrelevant to the bed's condition.", "C) The surrounding material should *not* be collected as a separate asset, but its damage should be reflected in the condition of the bed asset.", "D) It should be collected as a separate asset only if it is significantly damaged."],
                 answer: "C) The surrounding material should *not* be collected as a separate asset, but its damage should be reflected in the condition of the bed asset."
             },
@@ -565,6 +565,10 @@
             }
         ];
 
+        // Global variable to hold the randomized subset of quiz questions
+        let quizQuestionsSubset = [];
+        const NUMBER_OF_QUESTIONS = 40; // Define the number of questions to be asked
+
         // DOM elements
         const startScreen = document.getElementById('start-screen');
         const questionScreen = document.getElementById('question-screen');
@@ -634,6 +638,16 @@
             updateUserIdDisplay();
         });
 
+        /**
+         * Shuffles an array in place (Fisher-Yates algorithm).
+         * @param {Array} array The array to shuffle.
+         */
+        function shuffleArray(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]]; // Swap elements
+            }
+        }
 
         // Functions
         function startQuiz() {
@@ -645,6 +659,10 @@
             } else {
                 nameError.classList.add('hidden');
             }
+
+            // Shuffle all quiz data and select the first NUMBER_OF_QUESTIONS
+            shuffleArray(allQuizData);
+            quizQuestionsSubset = allQuizData.slice(0, NUMBER_OF_QUESTIONS);
 
             currentQuestionIndex = 0;
             score = 0;
@@ -673,15 +691,15 @@
             explanationText.textContent = ''; // Clear previous explanation text
             explanationLoading.classList.add('hidden'); // Hide loading spinner
 
-            if (currentQuestionIndex < quizData.length) {
-                const currentQuestion = quizData[currentQuestionIndex];
+            if (currentQuestionIndex < quizQuestionsSubset.length) { // Use subset length
+                const currentQuestion = quizQuestionsSubset[currentQuestionIndex];
                 // Remove question number from the question text for display, but keep it in quizData
                 const displayQuestionText = currentQuestion.question.replace(/^\d+:\s*/, '');
                 questionText.textContent = displayQuestionText;
                 
                 // Update progress
-                progressText.textContent = `Question ${currentQuestionIndex + 1} of ${quizData.length}`;
-                progressBar.style.width = `${((currentQuestionIndex + 1) / quizData.length) * 100}%`;
+                progressText.textContent = `Question ${currentQuestionIndex + 1} of ${quizQuestionsSubset.length}`; // Use subset length
+                progressBar.style.width = `${((currentQuestionIndex + 1) / quizQuestionsSubset.length) * 100}%`; // Use subset length
 
                 // Create and display options
                 currentQuestion.options.forEach(optionText => {
@@ -721,7 +739,7 @@
         }
 
         async function submitAnswer() {
-            const currentQuestion = quizData[currentQuestionIndex];
+            const currentQuestion = quizQuestionsSubset[currentQuestionIndex]; // Use subset
             const isCorrect = selectedOption === currentQuestion.answer;
             
             userAnswers.push({
@@ -743,7 +761,7 @@
             }
             
             submitBtn.disabled = true;
-            if (currentQuestionIndex < quizData.length - 1) {
+            if (currentQuestionIndex < quizQuestionsSubset.length - 1) { // Use subset length
                  submitBtn.textContent = 'Next Question';
                  setTimeout(() => {
                     currentQuestionIndex++;
@@ -756,7 +774,7 @@
         }
         
         function highlightAnswers() {
-            const currentQuestion = quizData[currentQuestionIndex];
+            const currentQuestion = quizQuestionsSubset[currentQuestionIndex]; // Use subset
             Array.from(optionsContainer.children).forEach(button => {
                 button.disabled = true; // Disable all buttons
                 if (button.textContent === currentQuestion.answer) {
@@ -813,10 +831,10 @@
             questionScreen.classList.add('hidden');
             resultsScreen.classList.remove('hidden');
 
-            scoreText.textContent = `${score} / ${quizData.length}`;
+            scoreText.textContent = `${score} / ${quizQuestionsSubset.length}`; // Use subset length
 
             // Provide feedback
-            const percentage = (score / quizData.length) * 100;
+            const percentage = (score / quizQuestionsSubset.length) * 100; // Use subset length
             if (percentage === 100) {
                 feedbackText.textContent = "Perfect score! You're a true expert!";
             } else if (percentage >= 80) {
@@ -875,7 +893,7 @@
                     userId: window.currentUserId,
                     participantName: participantName, // Save the participant's name
                     score: score,
-                    totalQuestions: quizData.length,
+                    totalQuestions: quizQuestionsSubset.length, // Save the actual number of questions asked
                     timestamp: window.firebase.firestore.FieldValue.serverTimestamp ? window.firebase.firestore.FieldValue.serverTimestamp() : new Date(), // Use serverTimestamp if available, otherwise local date
                     answers: JSON.stringify(simplifiedAnswers) // Stringify complex array for Firestore doc
                 });
