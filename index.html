@@ -124,6 +124,13 @@
         <div id="start-screen">
             <h1 class="text-3xl sm:text-4xl font-bold text-center text-blue-600 dark:text-blue-400 mb-4">Inventory Management Quiz</h1>
             <p class="text-center text-gray-600 dark:text-gray-400 mb-8">Test your knowledge on inventory management business rules and attributes. Click the button below to begin.</p>
+            
+            <div class="mb-6">
+                <label for="participant-name" class="block text-left text-gray-700 dark:text-gray-300 text-sm font-semibold mb-2">Your Name:</label>
+                <input type="text" id="participant-name" placeholder="Enter your name" class="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:text-gray-200">
+                <p id="name-error" class="text-red-500 text-sm mt-1 hidden">Please enter your name to start the quiz.</p>
+            </div>
+
             <button id="start-btn" class="w-full bg-blue-600 text-white py-3 px-6 rounded-lg font-semibold text-lg hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-300 dark:focus:ring-blue-800 transition-transform transform hover:scale-105">
                 Start Quiz
             </button>
@@ -567,6 +574,9 @@
         const submitBtn = document.getElementById('submit-btn');
         const restartBtn = document.getElementById('restart-btn');
 
+        const participantNameInput = document.getElementById('participant-name');
+        const nameError = document.getElementById('name-error');
+
         const questionText = document.getElementById('question-text');
         const optionsContainer = document.getElementById('options-container');
         const progressText = document.getElementById('progress-text');
@@ -589,6 +599,7 @@
         let score = 0;
         let userAnswers = [];
         let selectedOption = null;
+        let participantName = ''; // To store the participant's name
 
         // Event Listeners
         startBtn.addEventListener('click', startQuiz);
@@ -626,6 +637,15 @@
 
         // Functions
         function startQuiz() {
+            participantName = participantNameInput.value.trim();
+
+            if (participantName === '') {
+                nameError.classList.remove('hidden');
+                return;
+            } else {
+                nameError.classList.add('hidden');
+            }
+
             currentQuestionIndex = 0;
             score = 0;
             userAnswers = [];
@@ -853,6 +873,7 @@
 
                 await addDoc(collection(db, resultsCollectionPath), {
                     userId: window.currentUserId,
+                    participantName: participantName, // Save the participant's name
                     score: score,
                     totalQuestions: quizData.length,
                     timestamp: window.firebase.firestore.FieldValue.serverTimestamp ? window.firebase.firestore.FieldValue.serverTimestamp() : new Date(), // Use serverTimestamp if available, otherwise local date
