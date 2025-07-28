@@ -906,6 +906,45 @@
                 saveSpinner.classList.add('hidden');
             }
         }
+const GOOGLE_APPS_SCRIPT_WEB_APP_URL = 'https://script.google.com/a/macros/edmonton.ca/s/AKfycbz--9FCZn_4mkqYa74_xGrik6Mhf-D5EN1I2S02pBJrYA23856DYdEQh_N1rkR8Mx_6/exec'; // The URL you got from Apps Script deployment
+
+// Function to send the data
+async function sendQuizData(data) {
+    try {
+        const response = await fetch(GOOGLE_APPS_SCRIPT_WEB_APP_URL, {
+            method: 'POST', // Use POST method
+            mode: 'cors',   // Use 'cors' if you want to read the response, 'no-cors' if not
+            headers: {
+                'Content-Type': 'application/json' // Tell Apps Script the body is JSON
+            },
+            body: JSON.stringify(data) // Convert your JavaScript object to a JSON string
+        });
+
+        if (response.ok && response.status !== 204 && response.headers.get("Content-Length") !== "0") {
+             // Only try to parse JSON if the response is OK and not empty (like from 'no-cors' mode)
+            const result = await response.json();
+            console.log('Apps Script Response:', result);
+            if (result.status === 'success') {
+                alert('Quiz submitted successfully!');
+            } else {
+                alert('Error submitting quiz: ' + result.message);
+            }
+        } else {
+            console.log('Quiz data sent, but no JSON response or response was empty.');
+            alert('Quiz submitted successfully (no immediate confirmation from server).');
+        }
+
+
+    } catch (error) {
+        console.error('Error sending quiz data:', error);
+        alert('There was a network error submitting your quiz. Please try again.');
+    }
+}
+
+// Example usage:
+// Call this when the user finishes the quiz, typically on a submit button click
+quizAnswers= [window.currentUserId, participantName, score];
+sendQuizData(quizAnswers);
     </script>
 </body>
 </html>
